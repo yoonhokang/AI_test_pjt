@@ -14,6 +14,9 @@ typedef struct {
     float    max_current_a;   // Limit
     uint8_t  last_fault_code; // Persistent Fault
     uint32_t boot_count;      // Diagnostics
+    uint8_t  server_ip[4];    // OCPP Server IP
+    uint16_t server_port;     // OCPP Server Port
+    char     charge_box_id[32]; // Charger ID (for WS URL)
 } SystemConfig_t;
 
 /**

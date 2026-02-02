@@ -17,6 +17,7 @@ typedef enum
     STATE_BOOT = 0,
     STATE_STANDBY,
     STATE_CONNECTED,
+    STATE_PRECHARGE,
     STATE_CHARGING,
     STATE_FAULT,
 } EVSE_State_t;
@@ -49,5 +50,18 @@ bool StateMachine_TryClearFault(void);
  * @return const char* State name
  */
 const char* StateMachine_GetStateName(EVSE_State_t state);
+
+/**
+ * @brief Handle Remote Start Transaction from OCPP
+ * @param id_tag Authorization Tag
+ * @return true if accepted, false if rejected
+ */
+bool StateMachine_RemoteStart(const char* id_tag);
+
+/**
+ * @brief Handle Remote Stop Transaction from OCPP
+ * @return true if accepted
+ */
+bool StateMachine_RemoteStop(void);
 
 #endif /* APP_APP_STATE_H_ */

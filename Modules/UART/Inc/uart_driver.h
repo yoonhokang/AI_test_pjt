@@ -41,4 +41,13 @@ bool UART_CLI_Read(uint8_t *data);
  */
 void UART_CLI_Write(uint8_t *data, uint16_t len);
 
+void UART_CLI_Write(uint8_t *data, uint16_t len);
+
+/**
+ * @brief  ISR Callback for CLI UART (Hook from HAL_UART_RxCpltCallback)
+ * @param  huart UART Handle
+ */
+void UART_CLI_RxCpltCallback(UART_HandleTypeDef *huart);
+
 #endif /* MODULES_UART_UART_DRIVER_H_ */
+

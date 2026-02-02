@@ -4,37 +4,49 @@
  */
 
 #include "safety_monitor.h"
+#include "imd_driver.h"
+#include "meter_driver.h"
 #include <stdio.h>
 
 void Safety_Init(void)
 {
-    // GPIOs are already inited by MX_GPIO_Init in main.c
-    // Just print status
-    printf("[Safety] Monitor Initialized. Checking E-Stop (PC13)...\r\n");
-    
-    if (Safety_Check() != SAFETY_OK)
-    {
-        printf("[Safety] WARNING: E-Stop Active at Boot!\r\n");
-    }
+    printf("[Safety] Monitor Initialized (E-Stop, IMD, Temp).\r\n");
+    // Initial Check
+    Safety_Check();
 }
 
 Safety_Status_t Safety_Check(void)
 {
-    // Emergency Stop is on PC13.
-    // Nucleo User Button (Blue) is PC13.
-    // Schematic: PC13 pulled LOW by button press? Or High?
-    // Nucleo-64 (MB1136): PC13 is connected to B1 (USER). 
-    // Usually Active LOW (Pressed = Low, Released = High) with External Pull-up?
-    // Wait, STM32G4 Nucleo User Manual:
-    // B1 USER: Connected to PC13. "When the button is pressed the logic state is 0, otherwise 1".
-    // So Active Low.
-    
+    // 1. E-Stop Check (Hardwired)
     GPIO_PinState estop_state = HAL_GPIO_ReadPin(Emergency_Stop_GPIO_Port, Emergency_Stop_Pin);
-    
-    if (estop_state == GPIO_PIN_RESET) // Logic 0 = Pressed
+    if (estop_state == GPIO_PIN_RESET) 
     {
         return SAFETY_FAULT_ESTOP;
     }
-    
+
+    // 2. IMD Check (Modbus/CAN)
+    const IMD_Status_t *imd = IMD_GetStatus();
+    if (imd->valid)
+    {
+        if (imd->fault || imd->insulation_resistance_kohm < 100.0f) // Threshold: 100 kOhm
+        {
+            printf("[Safety] IMD Fault! R_iso: %.1f kOhm\r\n", imd->insulation_resistance_kohm);
+            return SAFETY_FAULT_IMD;
+        }
+    }
+    else
+    {
+        // Require IMD Communication for High Power?
+        // return SAFETY_FAULT_IMD; // Strict Safety
+    }
+
+    // 3. Over-Temperature Check
+    float temp = Meter_ReadTemperature();
+    if (temp > 85.0f)
+    {
+        printf("[Safety] Over Temperature! %.1f C\r\n", temp);
+        return SAFETY_FAULT_OVERTEMP;
+    }
+
     return SAFETY_OK;
 }

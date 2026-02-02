@@ -20,6 +20,7 @@
 #include "main.h"
 #include "cmsis_os.h"
 #include "adc.h"
+#include "dma.h"
 #include "fdcan.h"
 #include "tim.h"
 #include "usart.h"
@@ -27,8 +28,12 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "meter_driver.h"
+#include "uart_driver.h"
 /* USER CODE END Includes */
+
+#include "logger.h"
+
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
@@ -92,6 +97,7 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  MX_DMA_Init();
   MX_ADC1_Init();
   MX_FDCAN1_Init();
   MX_FDCAN2_Init();
@@ -99,8 +105,9 @@ int main(void)
   MX_USART1_UART_Init();
   MX_USART2_UART_Init();
   MX_USART3_UART_Init();
+  MX_FDCAN3_Init();
   /* USER CODE BEGIN 2 */
-
+  Logger_Init();
   /* USER CODE END 2 */
 
   /* Init scheduler */
@@ -171,6 +178,29 @@ void SystemClock_Config(void)
 /* USER CODE BEGIN 4 */
 
 /* USER CODE END 4 */
+
+/**
+  * @brief  Tx Transfer completed callback
+  * @param  huart: UART handle
+  * @retval None
+  */
+void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
+{
+  Logger_TxCpltCallback(huart);
+}
+
+/**
+  * @brief  Rx Transfer completed callback
+  * @param  huart: UART handle
+  * @retval None
+  */
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+{
+  UART_CLI_RxCpltCallback(huart);
+  Meter_RxCpltCallback(huart);
+}
+
+
 
 /**
   * @brief  Period elapsed callback in non blocking mode

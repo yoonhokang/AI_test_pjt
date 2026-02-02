@@ -65,7 +65,7 @@ int __io_putchar(int ch)
  * @brief  HAL UART Rx Transfer completed callback.
  *         Called by HAL_UART_IRQHandler -> UART_Receive_IT
  */
-void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+void UART_CLI_RxCpltCallback(UART_HandleTypeDef *huart)
 {
     // Check if the interrupt comes from our CLI UART
     if (cli_huart != NULL && huart->Instance == cli_huart->Instance)

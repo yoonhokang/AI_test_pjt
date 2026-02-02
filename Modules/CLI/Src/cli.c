@@ -362,9 +362,10 @@ static void Cmd_PowerTest(void)
     }
     
     // Readback Immediate Status
-    const Infy_Status_t *st = Infy_GetStatus();
-    printf("[Power] Status: %.1f V, %.1f A, ON=%d\r\n", 
-           st->output_voltage, st->output_current, st->is_on);
+    // Readback Immediate Status
+    const Infy_SystemStatus_t *st = Infy_GetSystemStatus();
+    printf("[Power] Status: %.1f V, %.1f A, Fault=%d\r\n", 
+           st->total_voltage, st->total_current, st->system_fault);
 }
 
 // OCPP Commands

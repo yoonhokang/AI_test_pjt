@@ -18,6 +18,14 @@ void Config_ResetDefaults(void)
     sys_config.last_fault_code = 0;
     sys_config.boot_count = 0;
     
+    // Default Network Config
+    sys_config.server_ip[0] = 192;
+    sys_config.server_ip[1] = 168;
+    sys_config.server_ip[2] = 0;
+    sys_config.server_ip[3] = 100;
+    sys_config.server_port = 8080;
+    strcpy(sys_config.charge_box_id, "CP1");
+    
     printf("[Config] Reset to Defaults.\r\n");
 }
 

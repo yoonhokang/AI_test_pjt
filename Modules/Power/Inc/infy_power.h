@@ -20,17 +20,19 @@
 #include <stdbool.h>
 
 // --- Configuration ---
+// --- Configuration ---
 #define INFY_USE_SIMULATION  1       // 1=Simulate Response, 0=Real CAN
+#define INFY_MAX_MODULES     10      // Max modules for 350kW+ (40kW * 10 = 400kW)
 
 // --- CAN Identifiers (Assumed) ---
 // Control: PGN 0xFF00, Priority 6 -> 0x18FF00xx
-#define INFY_CAN_ID_CONTROL  0x18005000 // Broadcast to all modules
-#define INFY_CAN_ID_STATUS   0x18005001 // Base Response ID
+#define INFY_CAN_ID_CONTROL_BASE  0x18005000 // Broadcast to all modules
+#define INFY_CAN_ID_STATUS_BASE   0x18005001 // Base Response ID (0x..01 ~ 0x..0A)
 
 // --- Data Structures ---
 
 /**
- * @brief Power Module Status Structure
+ * @brief Power Module Status Structure (Individual)
  */
 typedef struct {
     float output_voltage;    // Measured Output Voltage (V)
@@ -41,7 +43,17 @@ typedef struct {
     bool  fault_ot;          // Over Temp
     bool  comm_timeout;      // Communication Lost
     uint32_t last_rx_tick;   // For timeout logic
-} Infy_Status_t;
+} Infy_ModuleStatus_t;
+
+/**
+ * @brief System Status Structure (Aggregated)
+ */
+typedef struct {
+    float total_voltage;     // System Voltage (Max or Avg)
+    float total_current;     // System Total Current (Sum)
+    int   active_modules;    // Count of healthy modules
+    bool  system_fault;      // Any module fault
+} Infy_SystemStatus_t;
 
 /**
  * @brief Initialize Power Module Driver
@@ -61,15 +73,30 @@ void Infy_Init(FDCAN_HandleTypeDef *hfdcan);
 void Infy_SetOutput(float target_volts, float target_amps, bool enable);
 
 /**
- * @brief Get Latest Status from Module
- * @return Information about V/I and Faults
+ * @brief Get Latest System Status (Aggregated)
+ * @return Information about Total V/I
  */
-const Infy_Status_t* Infy_GetStatus(void);
+const Infy_SystemStatus_t* Infy_GetSystemStatus(void);
 
 /**
- * @brief Check if Power Module is Healthy
- * @return True if no faults and comms is OK
+ * @brief Get Individual Module Status
+ * @param index Module Index (0 ~ MAX-1)
+ * @return Pointer to module status
+ */
+const Infy_ModuleStatus_t* Infy_GetModuleStatus(uint8_t index);
+
+/**
+ * @brief Check if Power System is Healthy
+ * @return True if sufficient modules are active
  */
 bool Infy_IsHealthy(void);
+
+/**
+ * @brief Handle Incoming CAN Messages
+ * @param id CAN ID
+ * @param data Payload
+ * @param len Length
+ */
+void Infy_RxHandler(uint32_t id, uint8_t *data, uint8_t len);
 
 #endif /* MODULES_POWER_INFY_POWER_H_ */

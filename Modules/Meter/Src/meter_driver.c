@@ -1,69 +1,223 @@
 /**
  * @file    meter_driver.c
- * @brief   Power Meter Driver Implementation
+ * @brief   Power Meter Driver Implementation (Modbus RTU Support) - Async/DMA
  */
 
 #include "meter_driver.h"
+#include "usart.h" // For huart3
 #include <math.h>
 #include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
+#include <stdbool.h>
 
-// Internal State for Simulation
-static float sim_voltage = 220.0f;
-static float sim_current = 0.0f;
-static float sim_temp = 25.0f;
+// --- Configuration ---
+#define MODBUS_TIMEOUT_MS  200
+
+// --- State Machine ---
+typedef enum {
+    METER_IDLE,
+    METER_TX_VOLTAGE,
+    METER_RX_VOLTAGE,
+    METER_TX_CURRENT,
+    METER_RX_CURRENT,
+    METER_PROCESS_DATA
+} Meter_State_t;
+
+static Meter_State_t meter_state = METER_IDLE;
+static uint32_t meter_tick = 0;
+
+// --- Data Storage ---
+static float meter_voltage = 0.0f;
+static float meter_current = 0.0f;
+static float meter_power   = 0.0f;
+static float meter_energy  = 0.0f;
+static float meter_temp    = 25.0f;
+
+// Simulation fallback
+static float sim_current_target = 0.0f;
+
+// --- Modbus Buffers ---
+static uint8_t modbus_tx_buf[8];
+static uint8_t modbus_rx_buf[8]; // Fixed 7 bytes expected, 8 for safety
+
+// --- Helper Prototypes ---
+static uint16_t Modbus_CRC16(uint8_t *buffer, uint16_t buffer_length);
+static void Modbus_SendReadRequest(uint16_t reg_addr);
 
 void Meter_Init(void)
 {
-    // Need to init ADC if Real Mode
-    // HAL_ADC_Start(&hadc1); 
-}
-
-float Meter_ReadVoltage(void)
-{
-    #if METER_SIMULATION_MODE
-        // Simulate slight fluctuation
-        float noise = ((rand() % 100) - 50) / 100.0f; // -0.5 to +0.5
-        return sim_voltage + noise;
+    meter_state = METER_IDLE;
+    #if METER_USE_MODBUS
+        printf("[Meter] Initialized (Async Modbus). Addr: %d\r\n", METER_MODBUS_ADDR);
     #else
-        // Implement Real ADC Reading
-        // return ADC_GetVoltage();
-        return 0.0f;
+        printf("[Meter] Initialized (Simulation Mode).\r\n");
     #endif
 }
 
-float Meter_ReadCurrent(void)
+void Meter_Process(void)
 {
-    #if METER_SIMULATION_MODE
-        // Depends on State? 
-        // We can link this to Relay State later.
-        // For now, return stored sim value
-        return sim_current;
+    #if METER_USE_MODBUS
+    
+    switch (meter_state)
+    {
+        case METER_IDLE:
+            // Start Sequence: Request Voltage
+            Modbus_SendReadRequest(METER_REG_VOLTAGE);
+            meter_state = METER_TX_VOLTAGE;
+            meter_tick = HAL_GetTick();
+            break;
+
+        case METER_TX_VOLTAGE:
+            // Wait for TX Complete (handled by DMA basically mostly instant)
+            // But we transit to RX immediately after starting TX in DMA usually?
+            // Let's assume we start RX immediately after TX starts if using half-duplex properly,
+            // or we wait for TC. For simplicity, we moved to RX state in the Request function?
+            // Actually, HAL_UART_Transmit_DMA is non-blocking. 
+            // We should wait for TC or just rely on RX? Modbus Slave replies after processing.
+            // Let's stay in TX state until we decide to switch to RX, OR just switch to RX_WAIT.
+            
+            // Timeout Check
+            if (HAL_GetTick() - meter_tick > 50) 
+            {
+                 // TX Stuck? Reset
+                 meter_state = METER_IDLE; 
+            }
+            break;
+
+        case METER_RX_VOLTAGE:
+            // Waiting for RX Callback
+            if (HAL_GetTick() - meter_tick > MODBUS_TIMEOUT_MS)
+            {
+                // Timeout
+                // printf("[Meter] Vol Timeout\r\n"); // Heavy?
+                meter_state = METER_IDLE; // Retry next cycle
+            }
+            break;
+            
+        case METER_TX_CURRENT:
+             if (HAL_GetTick() - meter_tick > 50) 
+             {
+                 meter_state = METER_IDLE; 
+             }
+             break;
+
+        case METER_RX_CURRENT:
+            if (HAL_GetTick() - meter_tick > MODBUS_TIMEOUT_MS)
+            {
+                meter_state = METER_IDLE;
+            }
+            break;
+            
+        default:
+            meter_state = METER_IDLE;
+            break;
+    }
+    
+    // Calc Power
+    meter_power = meter_voltage * meter_current;
+
     #else
-        // Implement Real ADC Reading
-        return 0.0f;
+        // Simulation Logic
+        meter_voltage = 220.0f + ((rand() % 100) - 50) / 100.0f;
+        meter_current = sim_current_target;
+        meter_power = meter_voltage * meter_current;
     #endif
 }
 
-float Meter_ReadTemperature(void)
+// Internal: Trigger Modbus Read
+static void Modbus_SendReadRequest(uint16_t reg_addr)
 {
-    #if METER_SIMULATION_MODE
-        // Slowly increase if current > 0
-        if (sim_current > 1.0f) sim_temp += 0.01f;
-        else if (sim_temp > 25.0f) sim_temp -= 0.01f;
+    // 1. Build Packet
+    modbus_tx_buf[0] = METER_MODBUS_ADDR;
+    modbus_tx_buf[1] = 0x03; // Read Holding
+    modbus_tx_buf[2] = (reg_addr >> 8) & 0xFF;
+    modbus_tx_buf[3] = reg_addr & 0xFF;
+    modbus_tx_buf[4] = 0x00;
+    modbus_tx_buf[5] = 0x01; // Read 1 Register
+    
+    uint16_t crc = Modbus_CRC16(modbus_tx_buf, 6);
+    modbus_tx_buf[6] = crc & 0xFF;
+    modbus_tx_buf[7] = (crc >> 8) & 0xFF;
+    
+    // 2. Start DMA Transmit
+    HAL_UART_Transmit_DMA(&huart3, modbus_tx_buf, 8);
+    
+    // 3. Prepare DMA Receive (7 Bytes expected)
+    // We can start RX immediately as RS485 handles direction or 2-wire
+    // Assuming 2-wire with auto direction or full duplex.
+    // Ideally we wait for TX CPLT.
+    // For now, let's start RX here.
+    if (HAL_UART_Receive_DMA(&huart3, modbus_rx_buf, 7) == HAL_OK)
+    {
+        // Good
+    }
+}
+
+// ISR Callback (Hooked from main.c)
+void Meter_RxCpltCallback(UART_HandleTypeDef *huart)
+{
+    if (huart->Instance == USART3)
+    {
+        #if METER_USE_MODBUS
+        // Parse what we received
+        // Check CRC
+        uint16_t rx_crc = Modbus_CRC16(modbus_rx_buf, 5);
+        uint16_t pkt_crc = modbus_rx_buf[5] | (modbus_rx_buf[6] << 8);
         
-        return sim_temp;
-    #else
-        return 25.0f;
-    #endif
+        bool valid = (rx_crc == pkt_crc && modbus_rx_buf[0] == METER_MODBUS_ADDR);
+        uint16_t val = (modbus_rx_buf[3] << 8) | modbus_rx_buf[4];
+        
+        // State Transition
+        switch (meter_state)
+        {
+            case METER_TX_VOLTAGE: // Should be RX really
+            case METER_RX_VOLTAGE:
+                if (valid) meter_voltage = val / 10.0f;
+                
+                // Trigger Next: Current
+                Modbus_SendReadRequest(METER_REG_CURRENT);
+                meter_state = METER_TX_CURRENT; // Or RX_CURRENT directly
+                meter_state = METER_RX_CURRENT; // Skip TX wait logic for simplicity
+                meter_tick = HAL_GetTick();
+                break;
+                
+            case METER_TX_CURRENT:
+            case METER_RX_CURRENT:
+                if (valid) meter_current = val / 10.0f;
+                // Done for this cycle
+                meter_state = METER_IDLE; 
+                break;
+                
+            default:
+                meter_state = METER_IDLE;
+                break;
+        }
+        #endif
+    }
 }
 
-float Meter_ReadPower(void)
+
+static uint16_t Modbus_CRC16(uint8_t *buffer, uint16_t buffer_length)
 {
-    return Meter_ReadVoltage() * Meter_ReadCurrent();
+    uint16_t crc = 0xFFFF;
+    for (uint16_t pos = 0; pos < buffer_length; pos++) {
+        crc ^= (uint16_t)buffer[pos];
+        for (int i = 8; i != 0; i--) {
+            if ((crc & 0x0001) != 0) {
+                crc >>= 1;
+                crc ^= 0xA001;
+            } else {
+                crc >>= 1;
+            }
+        }
+    }
+    return crc;
 }
 
-// Helper to set Simulation Data (called from App/CLI)
-void Meter_Sim_SetCurrent(float amps)
-{
-    sim_current = amps;
-}
+float Meter_ReadVoltage(void) { return meter_voltage; }
+float Meter_ReadCurrent(void) { return meter_current; }
+float Meter_ReadPower(void)   { return meter_power; }
+float Meter_ReadEnergy(void)  { return meter_energy; }
+float Meter_ReadTemperature(void) { return meter_temp; }
+void Meter_Sim_SetCurrent(float amps) { sim_current_target = amps; }

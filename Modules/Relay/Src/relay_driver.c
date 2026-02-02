@@ -32,9 +32,20 @@ void Relay_SetMain(bool closed)
 
 void Relay_SetPrecharge(bool closed)
 {
-    GPIO_PinState state = closed ? RELAY_ACTIVE_STATE : RELAY_SAFE_STATE;
+    // [Hardware Config] No Physical Pre-charge Relay exists.
+    // Logic is handled by Power Module Soft-Start (Voltage Matching).
+    // Just log the intent for debugging.
+    if (closed)
+    {
+        printf("[Relay] Pre-charge Virtual State: CLOSED (Soft-Start Logic Active)\r\n");
+    }
+    else
+    {
+        printf("[Relay] Pre-charge Virtual State: OPEN\r\n");
+    }
     
-    HAL_GPIO_WritePin(Relay_Precharge_GPIO_Port, Relay_Precharge_Pin, state);
+    // GPIO_PinState state = closed ? RELAY_ACTIVE_STATE : RELAY_SAFE_STATE;
+    // HAL_GPIO_WritePin(Relay_Precharge_GPIO_Port, Relay_Precharge_Pin, state);
 }
 
 uint8_t Relay_GetState(void)

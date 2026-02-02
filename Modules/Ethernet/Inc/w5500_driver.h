@@ -24,6 +24,19 @@ void W5500_Init(void);
 #define SN_MR_TCP           0x01
 #define SN_MR_UDP           0x02
 
+// Status Register Values
+#define SOCK_CLOSED         0x00
+#define SOCK_INIT           0x13
+#define SOCK_LISTEN         0x14
+#define SOCK_SYNSENT        0x15
+#define SOCK_SYNRECV        0x16
+#define SOCK_ESTABLISHED    0x17
+#define SOCK_FIN_WAIT       0x18
+#define SOCK_CLOSING        0x1A
+#define SOCK_TIME_WAIT      0x1B
+#define SOCK_CLOSE_WAIT     0x1C
+#define SOCK_LAST_ACK       0x1D
+
 /**
  * @brief Open a Socket
  * @param sn Socket Number (0-7)
@@ -34,9 +47,21 @@ void W5500_Init(void);
 bool W5500_Socket(uint8_t sn, uint8_t protocol, uint16_t port);
 
 /**
- * @brief Connect to Server (TCP Client)
+ * @brief Connect to Server (TCP Client) - Blocking (Legacy)
  */
 bool W5500_Connect(uint8_t sn, uint8_t *addr, uint16_t port);
+
+/**
+ * @brief Start Connect to Server (Async)
+ * @return true if command accepted
+ */
+bool W5500_Connect_Start(uint8_t sn, uint8_t *addr, uint16_t port);
+
+/**
+ * @brief Check Connect Status (Async)
+ * @return Socket Status (SOCK_ESTABLISHED, SOCK_SYNSENT, etc)
+ */
+uint8_t W5500_Connect_Poll(uint8_t sn);
 
 /**
  * @brief Send Data

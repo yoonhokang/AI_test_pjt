@@ -15,9 +15,11 @@ typedef enum
 {
     SAFETY_OK = 0,
     SAFETY_FAULT_ESTOP,
-    SAFETY_FAULT_OVERTEMP, // Future placeholder
-    SAFETY_FAULT_GFCI      // Future placeholder
+    SAFETY_FAULT_IMD,
+    SAFETY_FAULT_OVERTEMP,
+    SAFETY_FAULT_WELDING
 } Safety_Status_t;
+
 
 /**
  * @brief Initialize Safety Monitor (GPIOs etc)
