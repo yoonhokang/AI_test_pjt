@@ -1,1 +1,4 @@
-**/Drivers/
+**/Debug/
+**/org.eclipse.cdt.core.prefs
+**/org.eclipse.cdt.codan.core.prefs
+**/stm32cubeide.project.prefs
