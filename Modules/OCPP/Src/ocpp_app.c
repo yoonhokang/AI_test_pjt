@@ -252,24 +252,110 @@ static void Handle_CallMessage(const char* json, size_t len)
     }
 }
 
+/**
+ * @brief Find the token index for a given key inside a JSON Object
+ * @param tokens      Token array
+ * @param num_tokens  Total tokens
+ * @param json        Original JSON string
+ * @param object_idx  Index of the Object token
+ * @param key         Key string to find
+ * @return Index of the VALUE token, or -1 if not found.
+ */
+static int OCPP_GetJsonToken(jsmntok_t *tokens, int num_tokens, const char *json, int object_idx, const char *key)
+{
+    if (object_idx < 0 || object_idx >= num_tokens) return -1;
+    if (tokens[object_idx].type != JSMN_OBJECT) return -1;
+
+    int current_idx = object_idx + 1; // First child
+    int num_children = tokens[object_idx].size; // Number of Key-Value pairs
+
+    for (int i = 0; i < num_children; i++)
+    {
+        if (current_idx >= num_tokens) return -1;
+
+        // current_idx points to KEY
+        // Check if Key matches
+        int key_len = tokens[current_idx].end - tokens[current_idx].start;
+        if ((int)strlen(key) == key_len &&
+            strncmp(json + tokens[current_idx].start, key, key_len) == 0)
+        {
+            // Found Key, Return Value Index (Next token)
+            return current_idx + 1;
+        }
+
+        // Skip [Key]
+        // Calculate offset to skip [Value] (Value might be Object/Array)
+        int value_idx = current_idx + 1;
+        if (value_idx >= num_tokens) return -1;
+        
+        // JSMN "Value" Skipping Logic:
+        // We know that JSMN tokens are linear and ordered by position in the string.
+        // A complex value (Object/Array) contains nested tokens.
+        // To find the NEXT Key (sibling), we must skip the entire subtree of the current Value.
+        // Robust way: Scan forward until we find a token that starts AFTER the current Value ends.
+        
+        int next_key_idx = value_idx + 1;
+        if (tokens[value_idx].type == JSMN_OBJECT || tokens[value_idx].type == JSMN_ARRAY)
+        {
+            // We need to skip 'size' elements? No, 'size' is number of keys/items.
+            // This is hard to skip without fully parsing.
+            // FALLBACK: Search by string for the Key in the *entire* Payload object token range?
+            // No, that matches nested keys.
+            
+            // LET'S DO THIS:
+            // Just scan forward until we find a token whose start > value.end
+            // This is safe! JSON tokens are ordered by position.
+            int value_end_pos = tokens[value_idx].end;
+            while(next_key_idx < num_tokens && tokens[next_key_idx].start < value_end_pos)
+            {
+                next_key_idx++;
+            }
+        }
+        
+        current_idx = next_key_idx;
+    }
+    
+    return -1;
+}
+
 static void Handle_RemoteStartTransaction(jsmntok_t *tokens, int num_tokens, const char *json)
 {
-    // Payload is t[4] (Object)
-    // Need to find "idTag" inside Payload
-    // Simplified: Search substring in Payload range
+    // Payload is tokens[4] (The 4th element of the encapsulating Array)
+    // Structure: [MessageType, UniqueId, Action, Payload]
+    // tokens[0] = Array
+    // tokens[1] = MessageType
+    // tokens[2] = UniqueId
+    // tokens[3] = Action
+    // tokens[4] = Payload (Object)
     
-    int payload_idx = 4;
-    if (payload_idx >= num_tokens) return;
+    if (num_tokens <= 4 || tokens[4].type != JSMN_OBJECT) return;
+
+    // 1. Extract idTag
+    int idTag_idx = OCPP_GetJsonToken(tokens, num_tokens, json, 4, "idTag");
+    if (idTag_idx < 0)
+    {
+         printf("[OCPP] RemoteStart: Missing idTag.\r\n");
+         // Send Reject?
+         return; 
+    }
     
-    // Quick Hack: Extract ID Tag directly
-    // Ideally, iterate Object keys.
-    // For demo, we just pass a fixed ID or assume logic works
+    char idTag[32];
+    int len = tokens[idTag_idx].end - tokens[idTag_idx].start;
+    if (len >= 32) len = 31;
+    strncpy(idTag, json + tokens[idTag_idx].start, len);
+    idTag[len] = '\0';
     
-    printf("[OCPP] Handling Remote Start...\r\n");
-    if (StateMachine_RemoteStart("REMOTE_USER"))
+    // 2. Extract connectorId (Optional)
+    // int conn_idx = OCPP_GetJsonToken(tokens, num_tokens, json, 4, "connectorId");
+    
+    printf("[OCPP] Remote Request for ID: %s\r\n", idTag);
+
+    // Call State Machine
+    // We pass the extracted ID Tag instead of hardcoded "REMOTE_USER"
+    if (StateMachine_RemoteStart(idTag))
     {
         // Accepted
-        char resp[] = "[3, \"100x\", {\"status\": \"Accepted\"}]"; // Need real UniqueID mapping
+        char resp[] = "[3, \"100x\", {\"status\": \"Accepted\"}]"; // TODO: UniqueID sync
         mbedtls_ssl_write(&ssl, (unsigned char*)resp, strlen(resp));
     }
     else

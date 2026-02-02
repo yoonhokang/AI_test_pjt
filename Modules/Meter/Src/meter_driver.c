@@ -21,6 +21,8 @@ typedef enum {
     METER_RX_VOLTAGE,
     METER_TX_CURRENT,
     METER_RX_CURRENT,
+    METER_TX_ENERGY,
+    METER_RX_ENERGY,
     METER_PROCESS_DATA
 } Meter_State_t;
 
@@ -39,11 +41,11 @@ static float sim_current_target = 0.0f;
 
 // --- Modbus Buffers ---
 static uint8_t modbus_tx_buf[8];
-static uint8_t modbus_rx_buf[8]; // Fixed 7 bytes expected, 8 for safety
+static uint8_t modbus_rx_buf[16]; // Increased for multi-register read (Max 9 bytes for 2 regs)
 
 // --- Helper Prototypes ---
 static uint16_t Modbus_CRC16(uint8_t *buffer, uint16_t buffer_length);
-static void Modbus_SendReadRequest(uint16_t reg_addr);
+static void Modbus_SendReadRequest(uint16_t reg_addr, uint16_t num_regs);
 
 void Meter_Init(void)
 {
@@ -63,7 +65,7 @@ void Meter_Process(void)
     {
         case METER_IDLE:
             // Start Sequence: Request Voltage
-            Modbus_SendReadRequest(METER_REG_VOLTAGE);
+            Modbus_SendReadRequest(METER_REG_VOLTAGE, 1);
             meter_state = METER_TX_VOLTAGE;
             meter_tick = HAL_GetTick();
             break;
@@ -108,6 +110,20 @@ void Meter_Process(void)
                 meter_state = METER_IDLE;
             }
             break;
+
+        case METER_TX_ENERGY:
+             if (HAL_GetTick() - meter_tick > 50) 
+             {
+                 meter_state = METER_IDLE; 
+             }
+             break;
+
+        case METER_RX_ENERGY:
+            if (HAL_GetTick() - meter_tick > MODBUS_TIMEOUT_MS)
+            {
+                meter_state = METER_IDLE;
+            }
+            break;
             
         default:
             meter_state = METER_IDLE;
@@ -126,15 +142,15 @@ void Meter_Process(void)
 }
 
 // Internal: Trigger Modbus Read
-static void Modbus_SendReadRequest(uint16_t reg_addr)
+static void Modbus_SendReadRequest(uint16_t reg_addr, uint16_t num_regs)
 {
     // 1. Build Packet
     modbus_tx_buf[0] = METER_MODBUS_ADDR;
     modbus_tx_buf[1] = 0x03; // Read Holding
     modbus_tx_buf[2] = (reg_addr >> 8) & 0xFF;
     modbus_tx_buf[3] = reg_addr & 0xFF;
-    modbus_tx_buf[4] = 0x00;
-    modbus_tx_buf[5] = 0x01; // Read 1 Register
+    modbus_tx_buf[4] = (num_regs >> 8) & 0xFF;
+    modbus_tx_buf[5] = num_regs & 0xFF;
     
     uint16_t crc = Modbus_CRC16(modbus_tx_buf, 6);
     modbus_tx_buf[6] = crc & 0xFF;
@@ -143,12 +159,12 @@ static void Modbus_SendReadRequest(uint16_t reg_addr)
     // 2. Start DMA Transmit
     HAL_UART_Transmit_DMA(&huart3, modbus_tx_buf, 8);
     
-    // 3. Prepare DMA Receive (7 Bytes expected)
-    // We can start RX immediately as RS485 handles direction or 2-wire
-    // Assuming 2-wire with auto direction or full duplex.
-    // Ideally we wait for TX CPLT.
-    // For now, let's start RX here.
-    if (HAL_UART_Receive_DMA(&huart3, modbus_rx_buf, 7) == HAL_OK)
+    // 3. Prepare DMA Receive (Variable Length)
+    // 1 Register: 3 Header + 2 Data + 2 CRC = 7 Bytes
+    // 2 Registers: 3 Header + 4 Data + 2 CRC = 9 Bytes
+    uint16_t rx_len = 5 + (num_regs * 2);
+    
+    if (HAL_UART_Receive_DMA(&huart3, modbus_rx_buf, rx_len) == HAL_OK)
     {
         // Good
     }
@@ -176,7 +192,7 @@ void Meter_RxCpltCallback(UART_HandleTypeDef *huart)
                 if (valid) meter_voltage = val / 10.0f;
                 
                 // Trigger Next: Current
-                Modbus_SendReadRequest(METER_REG_CURRENT);
+                Modbus_SendReadRequest(METER_REG_CURRENT, 1);
                 meter_state = METER_TX_CURRENT; // Or RX_CURRENT directly
                 meter_state = METER_RX_CURRENT; // Skip TX wait logic for simplicity
                 meter_tick = HAL_GetTick();
@@ -185,8 +201,28 @@ void Meter_RxCpltCallback(UART_HandleTypeDef *huart)
             case METER_TX_CURRENT:
             case METER_RX_CURRENT:
                 if (valid) meter_current = val / 10.0f;
-                // Done for this cycle
-                meter_state = METER_IDLE; 
+                
+                // Trigger Next: Energy (2 Registers)
+                Modbus_SendReadRequest(METER_REG_ENERGY, 2);
+                meter_state = METER_RX_ENERGY;
+                meter_tick = HAL_GetTick();
+                break;
+
+            case METER_TX_ENERGY:
+            case METER_RX_ENERGY:
+                if (valid) 
+                {
+                    // Parse 32-bit Float (IEEE 754 Big Endian)
+                    // Byte 3,4 = Reg1 (High?), Byte 5,6 = Reg2 (Low?)
+                    // Standard Modbus float is usually Big Endian Words.
+                    uint32_t raw = (modbus_rx_buf[3] << 24) | (modbus_rx_buf[4] << 16) |
+                                   (modbus_rx_buf[5] << 8)  | (modbus_rx_buf[6]);
+                    
+                    float f_val;
+                    memcpy(&f_val, &raw, 4);
+                    meter_energy = f_val; // Assumed kWh
+                }
+                meter_state = METER_IDLE;
                 break;
                 
             default:

@@ -20,6 +20,7 @@
 #define METER_MODBUS_ADDR      1
 #define METER_REG_VOLTAGE      0x0010
 #define METER_REG_CURRENT      0x0012
+#define METER_REG_ENERGY       0x0014 // Total Active Energy (kWh) - 2 Registers
 
 
 // Sim helper
