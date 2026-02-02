@@ -9,7 +9,7 @@
 #include "main.h"
 
 // Set to 0 if IWDG is not enabled in CubeMX/Hardware
-#define USE_HARDWARE_IWDG   0 
+#define USE_HARDWARE_IWDG   1
 
 /**
  * @brief Initialize Watchdog (if needed, usually done by CubeMX)

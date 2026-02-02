@@ -21,7 +21,7 @@
 
 // --- Configuration ---
 // --- Configuration ---
-#define INFY_USE_SIMULATION  1       // 1=Simulate Response, 0=Real CAN
+#define INFY_USE_SIMULATION  0       // 1=Simulate Response, 0=Real CAN
 #define INFY_MAX_MODULES     10      // Max modules for 350kW+ (40kW * 10 = 400kW)
 
 // --- CAN Identifiers (Assumed) ---

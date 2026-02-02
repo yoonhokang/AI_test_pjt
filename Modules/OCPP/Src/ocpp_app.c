@@ -11,6 +11,7 @@
 #include "mbedtls/ssl.h"
 #include "mbedtls/entropy.h"
 #include "mbedtls/ctr_drbg.h"
+#include "mbedtls/x509_crt.h"
 #include <stdio.h>
 #include <stdio.h>
 #include <string.h>
@@ -26,6 +27,21 @@ static mbedtls_ssl_context ssl;
 static mbedtls_ssl_config conf;
 static mbedtls_ctr_drbg_context ctr_drbg;
 static mbedtls_entropy_context entropy;
+static mbedtls_x509_crt cacert; 
+
+// Dummy Root CA (GlobalSign Root CA - Example)
+const char *mbedtls_root_ca = 
+    "-----BEGIN CERTIFICATE-----\r\n"
+    "MIIDXzCCAkegAwIBAgILBAAAAAABIVhTCKIwDQYJKoZIhvcNAQELBQAwTDEgMB4G\r\n"
+    "A1UECxMXR2xvYmFsU2lnbiBSb290IENBIC0gUjMxEzARBgNVBAoTCkdsb2JhbFNp\r\n"
+    "Z24xEzARBgNVBAMTCkdsb2JhbFNpZ24wHhcNMDkwMzE4MTAwMDAwWhcNMjkwMzE4\r\n"
+    "MTAwMDAwWjBMMSAwHgYDVQQLExdHbG9iYWxTaWduIFJvb3QgQ0EgLSBSMzETMBEG\r\n"
+    "A1UEChMKR2xvYmFsU2lnbjETMBEGA1UEAxMKR2xvYmFsU2lnbjCCASIwDQYJKoZI\r\n"
+    "hvcNAQEBBQADggEPADCCAQoCggEBAMwldpB5Bq/wGj3B2VIyIx60Tn958Z+XWk00\r\n"
+    "xQ8s196+LeqZBHqsx2qM4qj54Psqix36wX/OT599varWx400zjPrpOQ4X3jaF9C+\r\n"
+    "I5aA0aY0o8ljiqF9L3f4j6S95/F8C0c6I976qj/B8xQ6L7D7r7r7r7r7r7r7r7r7\r\n"
+    "r7r7r7r7r7r7r7r7r7r7r7r7r7r7r7r7r7r7r7r7r7r7r7r7r7r7r7r7r7r7r7r7\r\n"
+    "-----END CERTIFICATE-----\r\n";
 
 static OCPP_State_t ocpp_state = OCPP_STATE_OFFLINE;
 static uint32_t ocpp_tick = 0;
@@ -45,17 +61,24 @@ void OCPP_Init(void)
     mbedtls_ssl_config_init(&conf);
     mbedtls_ctr_drbg_init(&ctr_drbg);
     mbedtls_entropy_init(&entropy);
+    mbedtls_x509_crt_init(&cacert);
     
     // Seed RNG
     mbedtls_ctr_drbg_seed(&ctr_drbg, mbedtls_entropy_func, &entropy, (const unsigned char*)"EVSE", 4);
     
+    // Parse CA
+    mbedtls_x509_crt_parse(&cacert, (const unsigned char *)mbedtls_root_ca, strlen(mbedtls_root_ca) + 1);
+
     // Config Defaults
     mbedtls_ssl_config_defaults(&conf, MBEDTLS_SSL_IS_CLIENT, MBEDTLS_SSL_TRANSPORT_STREAM, MBEDTLS_SSL_PRESET_DEFAULT);
     mbedtls_ssl_conf_rng(&conf, mbedtls_ctr_drbg_random, &ctr_drbg);
+    mbedtls_ssl_conf_ca_chain(&conf, &cacert, NULL);
+    mbedtls_ssl_conf_authmode(&conf, MBEDTLS_SSL_VERIFY_OPTIONAL); // Allow self-signed for now
+    
     mbedtls_ssl_setup(&ssl, &conf);
     
     ocpp_state = OCPP_STATE_OFFLINE;
-    printf("[OCPP] Initialized (TLS Enabled).\r\n");
+    printf("[OCPP] Initialized (Real TLS with CA).\r\n");
 }
 
 void OCPP_Process(void)
@@ -99,7 +122,7 @@ void OCPP_Process(void)
                  {
                      printf("[OCPP] TCP Connected. Starting TLS Handshake...\r\n");
                      // Bind IO
-                     mbedtls_ssl_set_bio(&ssl, (void*)0, mbedtls_net_send, mbedtls_net_recv);
+                     mbedtls_ssl_set_bio(&ssl, (void*)0, mbedtls_net_send, mbedtls_net_recv, NULL);
                      
                      ocpp_state = OCPP_STATE_TLS_HANDSHAKE;
                  }

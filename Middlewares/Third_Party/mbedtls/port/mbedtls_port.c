@@ -35,21 +35,29 @@ void mbedtls_free(void *ptr)
     vPortFree(ptr);
 }
 
+extern RNG_HandleTypeDef hrng;
+
 // --- Hardware Entropy Poll ---
 // Used by mbedtls_entropy_func
 int mbedtls_hardware_poll(void *data, unsigned char *output, size_t len, size_t *olen)
 {
     (void)data;
-    
-    // In real STM32G4, use HAL_RNG.
-    // For now, use rand() but ensure we check len.
+    uint32_t val;
     
     if (output == NULL) return -1;
 
-    for(size_t i=0; i<len; i++)
+    for(size_t i=0; i<len; i+=4)
     {
-        // Ideally: HAL_RNG_GenerateRandomNumber(&hrng, &val);
-        output[i] = (unsigned char)(rand() & 0xFF);
+        if (HAL_RNG_GenerateRandomNumber(&hrng, &val) != HAL_OK)
+        {
+            return -1; // RNG Error
+        }
+        
+        // Copy 4 bytes (or remaining)
+        for(int j=0; j<4 && (i+j)<len; j++)
+        {
+            output[i+j] = (unsigned char)((val >> (8*j)) & 0xFF);
+        }
     }
     
     *olen = len;
